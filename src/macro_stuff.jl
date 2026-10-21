@@ -427,7 +427,7 @@ function par_study(
 
     etime = @elapsed begin 
         mat = local_par_study_prms["matrix_template"](local_par_study_prms)
-        if haskey(local_par_study_prms, "compute_tortuosity")
+        if get(local_par_study_prms, "compute_tortuosity", false)
           @show mat
           tor = EECNetworkImpedance.matrix_tortuosity(mat)
         end
@@ -452,7 +452,7 @@ function par_study(
       merge(
         local_par_study_prms,
         Dict("R" => R, "R_pol" => R_pol, "C_pol" => C_pol, "etime" => etime),
-        haskey(local_par_study_prms, "compute_tortuosity") ? Dict("tor" => tor) : Dict()
+        get(local_par_study_prms, "compute_tortuosity", false) ? Dict("tor" => tor) : Dict()
       )
     )  
   end
@@ -984,3 +984,4 @@ function plot_time_test(dir)
   ylabel("t [s]")
   return df
 end
+

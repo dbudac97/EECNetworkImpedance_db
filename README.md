@@ -418,7 +418,7 @@ The automatic ILU tolerance search uses at most 40 trial factorizations of its s
 
 ### Running the tests
 
-The GitHub Actions workflow tests Julia 1.8 and 1.10 using Python 3.10, the recorded Julia dependencies and Matplotlib 3.8.4 with NumPy 1.26.4. The Matplotlib pin is needed by the recorded PyPlot version (newer Matplotlib releases remove an API it uses). Setuptools 75.8.0 supplies the legacy `distutils` module when using Python 3.12 locally. Install `test/python-requirements.txt` in an isolated Python environment before running:
+The GitHub Actions workflow tests Julia 1.8 and 1.10 using Python 3.10, the recorded Julia dependencies and Matplotlib 3.8.4 with NumPy 1.26.4. The lockfile updates only Compat (3.47.0) and SortingAlgorithms (1.2.3) to permit Julia 1.10; other dependency versions are preserved. The Matplotlib pin is needed by the recorded PyPlot version (newer Matplotlib releases remove an API it uses). Setuptools 75.8.0 supplies the legacy `distutils` module when using Python 3.12 locally. Install `test/python-requirements.txt` in an isolated Python environment before running:
 
 ```sh
 MPLBACKEND=Agg PYTHON=/path/to/python julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.build("PyCall")'

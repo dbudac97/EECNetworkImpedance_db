@@ -1,7 +1,5 @@
 name: Julia regression tests
 on:
-  push:
-    branches: [fix/network-reliability]
   pull_request:
   workflow_dispatch:
 jobs:

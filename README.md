@@ -17,7 +17,7 @@ Material matrix can be also defined by a raster image using colors specified abo
 
 !["Specified cell geometry"](images/geometry.png?raw=true )
 
-In addition, left and right sides of the matrix is grasped by 1 column of LSZ layer as current collectors. 
+The left and right contacts are selected independently using `L_el_mat` and `R_el_mat`. Either contact may be LSM or YSZ. YSZ contacts impose the potential through the ion-conducting material, corresponding to an idealized ionic potentiostat in this network model.
 
 !["Cell geometry with electordes"](images/geometry_with_electrodes.png?raw=true )
 
@@ -58,7 +58,7 @@ The factor 1/2 is there so that the total resistance through the whole (e. g.) Y
 The package can be then installed via 
 ```julialang
 ]
-add https://github.com/Masicko/EECNetworkImpedance.jl
+add https://github.com/dbudac97/EECNetworkImpedance_db
 ```
 
 
@@ -80,18 +80,20 @@ Supposing we have either
 In addition, we can specify parameters as a set of pairs. The following are the default parameters:
 
 ```julialang
-physical_parameters = [ "R_YSZ" => 100, 
+physical_parameters = [ "R_YSZ" => 1/0.045,
                         "R_pol_YSZ" => 0,
                         "C_pol_YSZ" => 0.001, 
                         #
-                        "R_LSM" => 1, 
+                        "R_LSM" => 1/290,
                         "R_pol_LSM" => 40, 
                         "C_pol_LSM" => 0.005, 
                         #
-                        "R_pore" => 1000000]
+                        "R_pore" => 1e12]
 ```
 
-Note that `"R_pol_YSZ" => 0` which means only one significant arc should appear in Nyquist diagram and therefore *two point extrapolation* (see below in section Additional options) is viable as resulting to a dramatic speedup. To be precise, more arcs in Nyquist diagram can occure depending on the geometry. For example, even three equally large arcs can be produced using a artificially tailored geometry. However, for an efficient computation on sufficiently large and homogenous geometries, an assumption of one significant arc (and *two point extrapolation*) is valid. 
+TPE is a fast estimate of effective conductivity and aggregate polarization resistance for large statistical studies, not an exact reconstruction of a general network spectrum. It is particularly useful when simulating thousands of random packings. Highly organized geometries can exhibit multiple prominent arcs even with one local interfacial RC type. To study spectral shape or relaxation modes, supply an explicit frequency list and solve the full network at every requested frequency.
+
+The default TPE inputs are finite frequencies `[1e-3, 1e6]` Hz. Exact `0.0` and `Inf` frequencies are also supported. With the pair `[0.0, Inf]` (in either order), resistance extraction returns the high-frequency resistance and the difference between the endpoint resistances; capacitance is returned as zero because these two limits do not determine a relaxation time. Use this pair for resistance extraction (`return_R_RC=true`), rather than reconstruction of a dispersive spectrum.
 
 If less parameters are specified, the others are supposed to be default, i.e.
 
@@ -162,13 +164,12 @@ Practically useful keyword parameters are
 
 Advanced keyword parameters are 
 
-- `complex_type = ComplexF64` : changes the data type in which the impedance calculation is performed
 - `iterative_solver = "auto"` : for small problems (under $15^3$ voxels) is used direct solver and iterative for larger ones.
   - if `= false` : the system of equations is solved by a direct LU solver (julian `\` operator)
   - if `= true` : the system is solved by iterative solver using Biconjugate gradient stabilized method with using Crout version of incomplete LU decomposition as a preconditioner.
 - `fill_in_ratio = 12`: defines expected fill during the incomplete LU desomposition. It is a ratio of non-zero element count of aproximation of `L` matrix with respect to non-zero element count of original `A` matrix of the (sparse) linear system. Bigger `fill_in_ratio` means more realiable convergence of iterative solver but it requires more RAM space, which is the limiting factor for large systems (e.g. $10^6$ voxels and above).
 - `tau = "auto"`: a drop criterion parameter in incomplete LU process. It is a absolute (not relative) treshold and elements of size under this treshold are forgotten. If `"auto"`, an adaptive process is run to estimate a feasible value for `tau` for which the defined `fill_in_ratio` is achieved.
-- `compute_tortuosity = true` means that tortuosity of the domain will be computed and stored in the output in the column `tor`.
+- In a `par_study` dictionary, `"compute_tortuosity" => true` adds a `tor` column. This is a geometric shortest-path measure through the combined solid phase, not transport-derived tortuosity. Pore starting points are excluded and a domain with no solid path returns `Inf`.
 
 #### Lower level API 
 A user can directly access the computational core using function `material_matrix_to_impedance()` which accepts arguments these non-keyword arguments
@@ -179,10 +180,9 @@ A user can directly access the computational core using function `material_matri
 and keyword arguments
 
 - `f_list`
-- `complex_type`
 - `iterative_solver`
-- `verbose` : if `true`, every demanding computation step is measured using a macro `@time`
-- `return_only_linsys` : if `true` : the linear system of equations is constructed and returned as a tuple $(A, b)$ - matrix $A$ and right-hand-side $b$. The system is not solved.
+- `verbose` : if `true`, print the frequency being solved
+- `return_only_linsys` : if `true` : the linear system of equations is constructed and returned as a tuple `(A, b, current_measurement)` - matrix $A$ and right-hand-side $b$. The system is not solved.
 - `tau`
 - `fill_in_ratio`
 
@@ -217,10 +217,10 @@ homogenous_matrix = generate_matrix(dimensions, porosity, LSM_ratio)
 ### Additional stuctural parameters
 More specific structure can be defined using parameters which governs a tendency to group pixels together. Namely:
 
-- `pore_cavitance = Nothing`- a probability that next pore pixel will spawn next to already existing pore (if possible)
-  - if `= Nothing`, generating of random structure is fast because no "grouping algoritm" is involved.
+- `pore_cavitance = nothing`- a probability that next pore pixel will spawn next to already existing pore (if possible)
+  - if `= nothing`, generating of random structure is fast because no "grouping algoritm" is involved.
   - if `= 0.0`, generating of random structure is slower because "grouping algoritm" is invoked
-- `LSM_cavitance = 0.0`- a probability that next LSM pixel will spawn next to already existing LSM pixel (if possible). This keyword argument is working only if pore_cavitance keyword parameter is set to a real number (i.e. if `pore_cavitance = Nothing`, then parameter `LSM_cavitance` has no effect to generated structure).
+- `LSM_cavitance = 0.0`- a probability that next LSM pixel will spawn next to already existing LSM pixel (if possible). This keyword argument is working only if pore_cavitance keyword parameter is set to a real number (i.e. if `pore_cavitance = nothing`, then parameter `LSM_cavitance` has no effect to generated structure).
 
 ```julialang
 pseudo_homogenous_matrix = generate_matrix(dimensions, porosity, LSM_ratio, 
@@ -236,7 +236,7 @@ Generated domain can be rotated by function
 rotate_matrix!(domain, step, axis)
 ```
 
-which rotates the input domain (and changes it). There is a version (withoug the exclamation mark `!`) which does not change the original domain and returns the new rotated domain
+which rotates the input domain in place and returns it. Odd quarter-turns require equal lengths of the two rotated dimensions; otherwise use the nonmutating function, which returns an array with the corresponding dimensions exchanged. There is a version (withoug the exclamation mark `!`) which does not change the original domain and returns the new rotated domain
 
 ```julialang
 new_domain = rotate_matrix(domain, step, axis)
@@ -253,7 +253,7 @@ Voxels in domain can be marked by a number, which will specify its material conn
  - 1 - izolated material (not connected to electrodes)
  - 2 - material connected to left electrode
  - 3 - material connected to right electrode
- - 4 - material connected to both electrodes (only this voxels can participate on electric current flow)
+ - 4 - material connected to both electrodes through the solid phase
 
  This investigation is dome by function 
  
@@ -267,7 +267,7 @@ characterize_material_izolation(material_matrix)
 izolated_material_ratio(material_matrix, wanted_ids = [1,2,3])
 ```
  
- which return the ratio of "wanted_material_points / all_material_points". Defaut value is `wanted_ids = [1]` for strongly izolated voxels.
+ which return the ratio of "wanted_material_points / all_material_points". The default value is `wanted_ids = [1]` for strongly izolated voxels.
 
 ### Structure using multiple submatrices
 For more complicated domains composed of several different homogenous subdomains, there is a possibility to construct appropriate matrix. Suppose we want to construct *m* x *n* matrix consisting of 2 different submatrices. First, a list of submatrices must be created such that one submatrix is represented by its *location* (left upper corner and right lower corner) in the resulting matrix and *porosity* and *LSM_ratio*. 
@@ -307,7 +307,7 @@ LSM_ratio1 = 0.2
 LSM_ratio2 = 1.0
 LSM_ratio3 = 0.5
 
-template_submatrix_list = three_column_domain_template(LSM_ratio1, LSM_ratio1, LSM_ratio1,
+template_submatrix_list = three_column_domain_template(LSM_ratio1, LSM_ratio2, LSM_ratio3,
                                      #                              
                                      column_width = 10,
                                      porosity1 = 0.0, porosity3 = 0.2,
@@ -383,9 +383,54 @@ where there parameters are
 - `del_width = 10` number of pixels separating subimages
 - `out_filename = "compilation.png"` and output file is located in `folder_path`
 
+
+### Connectivity and bounded generation
+
+`generate_matrix` supports the following keywords for both random domains and lists of subdomains:
+
+- `check_connectivity=true`: retain only packings with a solid path between the two electrodes. This samples a distribution **conditioned on connectivity**; it is not an unconditional percolation study.
+- `check_connectivity=false`: return the first generated packing, including disconnected realizations. Use this for unbiased sampling of the generator and report the connected fraction separately.
+- `max_attempts=1000`: maximum total number of generated candidates. Failure throws an error, rather than returning a scalar in place of an array. The legacy `recursion_depth` keyword remains accepted as an alias for this total attempt limit.
+- `generation_stats=nothing`: optionally pass a `Dict{String,Any}()` to receive `"attempts"`, `"rejected"`, and `"connected"`. On failure the dictionary contains the final attempt count. These are statistics of this call; aggregate them across a study as needed.
+
+For composite structures each subdomain is generated once without a connectivity restriction. Contacts and overlaps are applied before testing the **assembled** packing. Retrying regenerates the whole candidate. This permits intentionally pore-only subdomains.
+
+```julia
+stats = Dict{String,Any}()
+packing = generate_matrix((30, 30), 0.5, 0.5;
+    check_connectivity=false, generation_stats=stats)
+classification = characterize_material_izolation(packing)
+isolated = classification .== 1
+```
+
+Connectivity, isolation classification, and shortest paths currently treat LSM and YSZ together as one solid phase. They do not separately assess ionic and electronic percolation. Pores in the electrical network retain the finite `R_pore`, so solid connectivity is a geometric classification, not a guarantee of exactly zero electrical leakage.
+
+### Numerical validation
+
+Both direct and iterative results are checked for finite potentials, the true residual `norm(A*x-b)`, and agreement of left and right electrode currents. Invalid results raise an error instead of silently becoming an impedance. Both `material_matrix_to_impedance` and `image_to_EIS` accept:
+
+- `solver_rtol=1e-8`, `solver_atol=0.0`: true residual must be at most `solver_atol + solver_rtol*norm(b)`.
+- `current_rtol=1e-6`, `current_atol=1e-12`: current imbalance must be at most `current_atol + current_rtol*max(abs(I_left), abs(I_right))`. Absolute current tolerance is in raw network current units, before specific-impedance normalization.
+- `max_mv_products=2000`: BiCGStab matrix-vector product limit. If BiCGStab breaks down or fails the residual check, a restarted GMRES retry has at most this many iterations; it does not fall back to a direct factorization.
+- `solver_diagnostics=nothing`: optionally pass an empty vector to collect frequency, solver method, residual, both electrode currents and their absolute difference. Entries correspond to directly solved frequencies, including only the two input frequencies in TPE mode.
+
+The automatic ILU tolerance search uses at most 40 trial factorizations of its sample matrix. An unattainable fill target does not cause unlimited iteration. The fill target is an estimate on that sample, not a strict memory bound for the full matrix.
+
+### Running the tests
+
+The GitHub Actions workflow tests Julia 1.8 and 1.10 using Python 3.10, the recorded Julia dependencies and Matplotlib 3.8.4 with NumPy 1.26.4. The lockfile updates only Compat (3.47.0) and SortingAlgorithms (1.2.3) to permit Julia 1.10; other dependency versions are preserved. The Matplotlib pin is needed by the recorded PyPlot version (newer Matplotlib releases remove an API it uses). Setuptools 75.8.0 supplies the legacy `distutils` module when using Python 3.12 locally. Install `test/python-requirements.txt` in an isolated Python environment before running:
+
+```sh
+MPLBACKEND=Agg PYTHON=/path/to/python julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.build("PyCall")'
+MPLBACKEND=Agg julia --project -e 'using Test; include("test/runtests.jl")'
+```
+
+Tests include analytical 2D/3D spectra, LSM and YSZ contacts, exact frequency endpoints, solver agreement, invalid-solution rejection, bounded generation, rotations, isolation, and geometric shortest paths.
+
 ## Acknowledgement
 
 This work was supported by the German Research Foundation, DFG project no. FU 316/14-1, and by the Czech Science Foundation, GAČR project no. 19-14244J.
+
 
 
 

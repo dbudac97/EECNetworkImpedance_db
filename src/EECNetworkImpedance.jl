@@ -11,10 +11,10 @@ using Interpolations
 using Optim
 using SparseArrays
 using Statistics
+using LinearAlgebra
 
 using IterativeSolvers
 using IncompleteLU
-using LinearSolve
 #using ILUZero
 #using Krylov
 
@@ -69,3 +69,4 @@ export par_study
 # export sym_get_A_b_from_matrix
 
 end # module EECNetworkImpedance
+

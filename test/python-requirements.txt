@@ -1,0 +1,4 @@
+# Compatible with the PyPlot version recorded in Manifest.toml.
+matplotlib==3.8.4
+numpy==1.26.4
+setuptools==75.8.0

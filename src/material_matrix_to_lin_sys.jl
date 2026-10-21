@@ -491,7 +491,13 @@ function integrate_between_columns(col, aux_A, Y_vector, dims)
 end
 
 function current_measurement(aux_A, Y_vector, dims)
-  return integrate_between_columns(1, aux_A, Y_vector, dims)
+  left = integrate_between_columns(1, aux_A, Y_vector, dims)
+  right = integrate_between_columns(dims[2] + 1, aux_A, Y_vector, dims)
+  return function (Us, w; side=:left)
+    side == :left && return left(Us, w)
+    side == :right && return right(Us, w)
+    throw(ArgumentError("side must be :left or :right"))
+  end
 end
 
 

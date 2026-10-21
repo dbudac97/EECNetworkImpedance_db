@@ -35,6 +35,12 @@ function image_to_EIS(
             iterative_solver = "auto",
             tau="auto",
             fill_in_ratio = 12,
+            solver_rtol = 1e-8,
+            solver_atol = 0.0,
+            current_rtol = 1e-6,
+            current_atol = 1e-12,
+            max_mv_products::Integer = 2000,
+            solver_diagnostics = nothing,
             verbose = false,
             pyplot=true,
             return_R_RC=false,
@@ -74,7 +80,10 @@ function image_to_EIS(
     iterative_solver = iterative_solver,
     verbose = verbose,
     tau = tau,
-    fill_in_ratio = fill_in_ratio, 
+    fill_in_ratio = fill_in_ratio,
+    solver_rtol=solver_rtol, solver_atol=solver_atol,
+    current_rtol=current_rtol, current_atol=current_atol,
+    max_mv_products=max_mv_products, solver_diagnostics=solver_diagnostics,
     #
     L_el_mat=L_el_mat,
     R_el_mat=R_el_mat
@@ -185,3 +194,4 @@ function image_to_EIS(
     return f_list, Z_list  
   end
 end
+

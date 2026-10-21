@@ -1,49 +1,71 @@
 
+# All connectivity checks treat LSM and YSZ as a single solid phase.
+function validate_generation_inputs(dimensions, porosity, LSM_ratio,
+                                    pore_cavitance, LSM_cavitance)
+  length(dimensions) in (2, 3) || throw(ArgumentError("expected 2D or 3D dimensions"))
+  all(d -> d isa Integer && d > 0, dimensions) ||
+    throw(ArgumentError("dimensions must be positive integers"))
+  for (name, value) in (("porosity", porosity), ("LSM_ratio", LSM_ratio),
+                        ("pore_cavitance", pore_cavitance), ("LSM_cavitance", LSM_cavitance))
+    value === nothing && continue
+    isfinite(value) && 0 <= value <= 1 ||
+      throw(ArgumentError("$name must be between 0 and 1"))
+  end
+  pore_cavitance === nothing && LSM_cavitance != 0.0 &&
+    throw(ArgumentError("set pore_cavitance when using LSM_cavitance"))
+end
+
+function generation_attempt_limit(max_attempts, recursion_depth)
+  limit = recursion_depth === nothing ? max_attempts : recursion_depth
+  isfinite(limit) && isinteger(limit) && 1 <= limit <= typemax(Int) ||
+    throw(ArgumentError("max_attempts (or legacy recursion_depth) must be a positive integer"))
+  return Int(limit)
+end
+
+function generate_connected_domain(make_domain; check_connectivity, max_attempts,
+                                    generation_stats=nothing)
+  for attempt in 1:max_attempts
+    domain = make_domain()
+    connected = (check_connectivity || generation_stats !== nothing) ?
+                  check_material_connection(domain) : nothing
+    if generation_stats !== nothing
+      generation_stats["attempts"] = attempt
+      generation_stats["rejected"] = check_connectivity ? attempt - (connected ? 1 : 0) : 0
+      generation_stats["connected"] = connected
+    end
+    (!check_connectivity || connected) && return domain
+  end
+  throw(ErrorException("No solid path between electrodes after $max_attempts attempts; " *
+                       "use check_connectivity=false to retain unconnected packings."))
+end
+
 function generate_matrix(dimensions, porosity::Float64, LSM_ratio::Float64;
     pore_cavitance::Union{Float64, Nothing}=nothing,
     LSM_cavitance::Union{Float64, Nothing}=0.0,
-    recursion_depth=1e12, check_connectivity=true)
-  if typeof(pore_cavitance) == Nothing
-    if LSM_cavitance != 0.0
-      println("ERROR: LSM_cavitance != 0.0 ---> if you really want nonzero LSM_cavitance, set pore_cavitance to a float number.")
-      throw(Exception)
-      return -666
-    end
-    the_domain = Array{Int16}(undef, dimensions)
-    repetition_number = 1
-    while repetition_number < recursion_depth
-      for i in 1:length(the_domain[:])
-        if rand() <= porosity
-          the_domain[i] = i_pore
-        else
-          if rand() <= LSM_ratio
-            the_domain[i] = i_LSM
-          else
-            the_domain[i] = i_YSZ
-          end
-        end
-      end      
-      if !check_connectivity || check_material_connection(the_domain)
-        return the_domain
-      else
-        repetition_number += 1
-      end
-    end
-    
-    println("ERROR: recursion_depth = 0 ... no trials left ... material_connectivity is not ensured")
-    return -1
-  elseif typeof(pore_cavitance) != Nothing
-    return shoot_pores(dimensions, porosity, LSM_ratio, 
-                        pore_cavitance=pore_cavitance, 
-                        LSM_cavitance = LSM_cavitance,
-                        recursion_depth=recursion_depth, 
-                        check_connectivity=check_connectivity)
+    recursion_depth=nothing, max_attempts::Integer=1000,
+    check_connectivity=true, generation_stats=nothing)
+  validate_generation_inputs(dimensions, porosity, LSM_ratio, pore_cavitance, LSM_cavitance)
+  limit = generation_attempt_limit(max_attempts, recursion_depth)
+  if pore_cavitance !== nothing
+    return shoot_pores(dimensions, porosity, LSM_ratio;
+      pore_cavitance=pore_cavitance, LSM_cavitance=LSM_cavitance,
+      max_attempts=limit, check_connectivity=check_connectivity,
+      generation_stats=generation_stats)
   end
+  function make_domain()
+    domain = Array{Int16}(undef, dimensions)
+    for i in eachindex(domain)
+      domain[i] = rand() < porosity ? i_pore : (rand() < LSM_ratio ? i_LSM : i_YSZ)
+    end
+    return domain
+  end
+  return generate_connected_domain(make_domain; check_connectivity=check_connectivity,
+    max_attempts=limit, generation_stats=generation_stats)
 end
 
 
 function generate_submatrix_to_matrix(matrix, left_upper::Union{Tuple, Array}, right_lower::Union{Tuple, Array}, porosity::Float64, LSM_ratio::Float64)
-  submatrix = generate_matrix(right_lower .- left_upper .+ (1,1), porosity, LSM_ratio)
+  submatrix = generate_matrix(right_lower .- left_upper .+ (1,1), porosity, LSM_ratio; check_connectivity=false)
   matrix[left_upper[1] : right_lower[1], left_upper[2] : right_lower[2]] = deepcopy(submatrix)
   return 
 end
@@ -74,7 +96,18 @@ function get_default_submatrix_list()
   ]
 end
 
-function generate_matrix(submatrix_list::Array=get_default_submatrix_list())
+function generate_matrix(submatrix_list::Array=get_default_submatrix_list();
+                         check_connectivity=true, max_attempts::Integer=1000,
+                         recursion_depth=nothing, generation_stats=nothing)
+  limit = generation_attempt_limit(max_attempts, recursion_depth)
+  return generate_connected_domain(; check_connectivity=check_connectivity,
+      max_attempts=limit, generation_stats=generation_stats) do
+    assemble_submatrices(submatrix_list)
+  end
+end
+
+function assemble_submatrices(submatrix_list)
+  isempty(submatrix_list) && throw(ArgumentError("submatrix list must not be empty"))
   max_height, max_width = -1, -1
   for submatrix in submatrix_list
     s = submatrix[2]
@@ -95,8 +128,7 @@ function generate_matrix(submatrix_list::Array=get_default_submatrix_list())
   invalid_submatrix_list = false
   foreach(x -> x==-1 ?  invalid_submatrix_list = true : false, output_matrix)
   if invalid_submatrix_list
-    println("ERROR: invalid_submatrix_list input")
-    return throw(Exception)
+    throw(ArgumentError("submatrices must cover every pixel"))
   else
     return output_matrix
   end
@@ -581,7 +613,19 @@ function get_body_list(domain)
   end  
 end
 
-function shoot_pores(dims, porosity, LSM_ratio; pore_cavitance, LSM_cavitance, recursion_depth=10, check_connectivity=true)
+function shoot_pores(dims, porosity, LSM_ratio; pore_cavitance, LSM_cavitance,
+                     recursion_depth=nothing, max_attempts::Integer=1000,
+                     check_connectivity=true, generation_stats=nothing)
+  validate_generation_inputs(dims, porosity, LSM_ratio, pore_cavitance, LSM_cavitance)
+  limit = generation_attempt_limit(max_attempts, recursion_depth)
+  return generate_connected_domain(; check_connectivity=check_connectivity,
+      max_attempts=limit, generation_stats=generation_stats) do
+    shoot_pores_once(dims, porosity, LSM_ratio; pore_cavitance=pore_cavitance,
+                     LSM_cavitance=LSM_cavitance)
+  end
+end
+
+function shoot_pores_once(dims, porosity, LSM_ratio; pore_cavitance, LSM_cavitance)
   
   domain = Array{Integer}(undef, dims)
   body_list = get_body_list(domain)
@@ -696,17 +740,7 @@ function shoot_pores(dims, porosity, LSM_ratio; pore_cavitance, LSM_cavitance, r
 
 
 
-  the_domain = get_standard_domain(extended_domain)
-  if check_material_connection(the_domain) || !check_connectivity
-    return the_domain
-  else
-    if recursion_depth > 0
-      return shoot_pores(dims, porosity, LSM_ratio, pore_cavitance=pore_cavitance, LSM_cavitance=LSM_cavitance, recursion_depth=recursion_depth-1)
-    else
-      println("ERROR: recursion_depth = 0 ... no trials left ... material_connectivity is not ensured")
-      return -1
-    end
-  end
+  return get_standard_domain(extended_domain)
 end
 
 
@@ -789,70 +823,41 @@ end
 
 
 function rotate_2D(M, step=1)
-  m,n = size(M)
-  if m != n
-      println("ERROR: matrix dimensions $((m,n)) are not equal")
-      return throw(Exception)
-  end
-  if m <= 0
-      println("WARNING: rotating empty matrix")
-      return deepcopy(M)
-  end
-  res = Array{typeof(M[1])}(undef, size(M)...)
-  
-  step = mod(step, 4)
-  if step == 0
-      return deepcopy(M)
-  end
-  
-  n = size(M)[1]
-  for i in 1:n
-      if step==1
-          res[i, :] .= M[end:-1:1, i]
-      elseif step==2
-          res[i, :] .= M[n-i+1, end:-1:1]
-      elseif step==3
-          res[i, :] .= M[:, n-i+1]
-      end
-  end
-  res
+  return rotr90(M, mod(step, 4))
 end
 
-
-function rotate_matrix!(A, step, axis)
-  if length(size(A))==2
-    return rotate_2D(A, step)
-  elseif length(size(A))!=3
-    println("ERROR: matrix is neither 3D nor 2D")
-    return throw(Exception)
+function rotation_axes(A, axis)
+  if ndims(A) == 2
+    axis in ("x", "y", "z") || throw(ArgumentError("unknown rotation axis $axis"))
+    return (1, 2)
   end
-
-
-  if axis=="x"
-    for layer in 1:size(A)[3]
-      A[layer, :, :] .= rotate_2D(A[layer, :, :], step)
-    end
-  elseif axis=="y"
-    for layer in 1:size(A)[3]
-      A[:, layer, :] .= rotate_2D(A[:, layer, :], step)
-    end
-  elseif axis=="z"
-    for layer in 1:size(A)[3]
-        A[:, :, layer] .= rotate_2D(A[:, :, layer], step)
-    end
-  else  
-    println("ERROR: wrong axis $(axis) specification")
-    throw(Exception)
-  end
+  ndims(A) == 3 || throw(ArgumentError("expected a 2D or 3D array"))
+  axis == "x" && return (2, 3)
+  axis == "y" && return (1, 3)
+  axis == "z" && return (1, 2)
+  throw(ArgumentError("unknown rotation axis $axis"))
 end
 
-
-function rotate_matrix(A, step, axis)
-  aux = deepcopy(A)
-  rotate_matrix!(aux, step, axis)
-  return aux
+function rotate_matrix(A, step::Integer, axis)
+  first_axis, second_axis = rotation_axes(A, axis)
+  result = copy(A)
+  # The same orientation as the original square-slice rotations.
+  for _ in 1:mod(step, 4)
+    permutation = collect(1:ndims(A))
+    permutation[first_axis], permutation[second_axis] = second_axis, first_axis
+    result = reverse(permutedims(result, permutation); dims=second_axis)
+  end
+  return result
 end
 
+function rotate_matrix!(A, step::Integer, axis)
+  first_axis, second_axis = rotation_axes(A, axis)
+  if isodd(step) && size(A, first_axis) != size(A, second_axis)
+    throw(DimensionMismatch("a quarter-turn changes array shape; use rotate_matrix"))
+  end
+  copyto!(A, rotate_matrix(A, step, axis))
+  return A
+end
 
 
 function search_wide(domain; starting_point, feasible_idxs=[], blocking_idxs=[])
@@ -864,10 +869,15 @@ function search_wide(domain; starting_point, feasible_idxs=[], blocking_idxs=[])
   
   starting_idx = 1
   list_to_process = [starting_point .+ 1]
-  aux_domain[(starting_point .+ 1)...] = 1
   
   ending_aux_coord = nothing
+  start = Tuple(starting_point)
+  checkbounds(Bool, domain, start...) || throw(ArgumentError("start is outside the domain"))
+  if !(domain[start...] in i_material_list)
+    return aux_domain, 0
+  end
 
+  aux_domain[(starting_point .+ 1)...] = 1
   while starting_idx <= length(list_to_process)
     aux_coors = list_to_process[starting_idx]
     act_num = aux_domain[(aux_coors)...]
@@ -911,6 +921,8 @@ function matrix_tortuosity(domain)
       ad, p = EECNetworkImpedance.search_wide(domain; starting_point = length(size(domain)) == 3 ? [x,1,z] : [x,1])
       p > 0 ? push!(paths, p) : Nothing
   end
-  return mean(paths)/size(domain)[2]
+  # Inf explicitly denotes no solid path; do not silently average an empty set.
+  return isempty(paths) ? Inf : mean(paths)/size(domain, 2)
 end
+
 

@@ -18,7 +18,10 @@ Base.@kwdef mutable struct parameters
 end
 
 function RC_el(R, C, w)
-  return (R/(1 + C*R*w*im))
+  # Evaluate exact endpoints explicitly, including a purely resistive C=0 branch.
+  (iszero(R) || (isinf(w) && C > 0)) && return 0.0
+  (iszero(C) || iszero(w)) && return R
+  return R/(1 + C*R*w*im)
 end
 
 function get_Y_entry_from_material_matrix_codes(n1, n2, p::parameters)
@@ -143,5 +146,6 @@ function subimages_composition(;folder_path,
   save("$(folder_path)/$(out_filename)", big_image)
   return
 end
+
 
 
